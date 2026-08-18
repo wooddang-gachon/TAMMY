@@ -1,0 +1,43 @@
+{
+  "parser": "@typescript-eslint/parser",
+  "plugins": ["@typescript-eslint", "prettier", "jsdoc", "markdown"],
+  "extends": [
+    "eslint:recommended",
+    "google",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:jsdoc/recommended-typescript",
+    "plugin:prettier/recommended"
+  ],
+  "env": {
+    "node": true,
+    "es2021": true
+  },
+  "overrides": [
+    {
+      "files": ["**/*.md"],
+      "processor": "markdown/markdown"
+    },
+    {
+      "files": ["**/*.test.ts", "**/mocks/**/*.ts"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-unused-vars": "off"
+      }
+    }
+  ],
+  "rules": {
+    "new-cap": "off",
+    "@typescript-eslint/no-explicit-any": "error",
+    "prettier/prettier": "error",
+    "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "require-jsdoc": "off",
+    "valid-jsdoc": "off",
+    "camelcase": "off",
+    "jsdoc/check-tag-names": "off",
+    "jsdoc/require-jsdoc": "off",
+    "jsdoc/require-param": "off",
+    "jsdoc/require-returns": "off",
+    "jsdoc/require-param-description": "off",
+    "jsdoc/require-returns-description": "off"
+  }
+}

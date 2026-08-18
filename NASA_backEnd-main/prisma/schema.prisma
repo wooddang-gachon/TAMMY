@@ -1,0 +1,509 @@
+datasource db {
+  provider = "mysql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// 1. ENUM 선언 (v3 schema.sql 1:1 매핑)
+// ==========================================
+
+enum DeviceType {
+  IOS
+  ANDROID
+  WEB
+}
+
+enum AuthProvider {
+  LOCAL
+  KAKAO
+  GOOGLE
+  APPLE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  WITHDRAWN
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum LogCategory {
+  WATER
+  EMOTION
+  JOURNAL
+  EXERCISE
+}
+
+enum PlanetType {
+  MEAL
+  WATER
+  EMOTION
+  LIFESTYLE
+  RETROSPECT
+}
+
+enum TravelStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum Sender {
+  USER
+  TAMMY
+  TAMMY_AI
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACK
+}
+
+enum EmotionState {
+  HAPPY
+  SAD
+  ANGRY
+  STRESSED
+  CALM
+}
+
+
+enum TriggerType {
+  NEG_EMOTION
+  NO_WATER
+  NO_EXERCISE
+  SYSTEM
+}
+
+enum ProactiveStatus {
+  PENDING
+  SENT
+  RESPONDED
+  EXPIRED
+}
+
+enum ActionType {
+  CLICK
+  SCREEN_VIEW
+  SCROLL
+  TEXT_INPUT
+  BUTTON_TAP
+}
+
+enum ChangeReason {
+  MEAL_LOG
+  WORKOUT_CHECK
+  WATER_LOG
+  MOOD_LOG
+  CHAT_EMPATHY
+  LEVEL_UP
+  WARP
+}
+
+enum MatchType {
+  EXACT
+  ALIAS
+  USER_CONFIRMED
+}
+
+// ==========================================
+// 2. MODEL 선언 (v3 schema.sql 1:1 매핑)
+// ==========================================
+
+model users {
+  id                      Int                    @id @default(autoincrement())
+  email                   String                 @unique @db.VarChar(255)
+  password_hash           String?                @db.VarChar(255)
+  auth_provider           AuthProvider           @default(LOCAL)
+  nickname                String                 @db.VarChar(50)
+  gender                  Gender?
+  age                     Int?
+  current_fuel            Int?                   @default(0)
+  refresh_token           String?                @db.Text
+  status                  UserStatus             @default(ACTIVE)
+  last_login_at           DateTime?              @db.Timestamp(0)
+  created_at              DateTime               @default(now()) @db.Timestamp(0)
+  updated_at              DateTime               @default(now()) @updatedAt @db.Timestamp(0)
+  deleted_at              DateTime?              @db.Timestamp(0)
+
+  // 1:1 관계
+  tammy_statuses          tammy_statuses?
+
+  // 1:N 관계
+  quick_logs              quick_logs[]
+  planet_travels          planet_travels[]
+  user_planet_progress    user_planet_progress[]
+  fuel_logs               fuel_logs[]
+  monthly_retro_reports   monthly_retro_reports[]
+  planet_reports          planet_reports[]
+  meals                   meals[]
+  chat_messages           chat_messages[]
+  proactive_triggers      proactive_triggers[]
+  user_action_logs        user_action_logs[]
+  tammy_status_logs       tammy_status_logs[]
+  user_push_tokens        user_push_tokens[]
+
+  @@index([email], map: "idx_user_email")
+}
+
+model tammy_statuses {
+  user_id         Int      @id
+  level           Int      @default(1)
+  current_exp     Int      @default(0)
+  empathy_index   Int      @default(0)
+  health_index    Int      @default(0)
+  activity_index  Int      @default(0)
+  happiness_index Int      @default(0)
+  updated_at      DateTime @default(now()) @updatedAt @db.Timestamp(0)
+
+  user            users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+
+
+enum PlanetProgressStatus {
+  READY
+  TRAVELING
+  ARRIVED
+}
+
+model quick_logs {
+  id                   BigInt      @id @default(autoincrement())
+  user_id              Int
+  category             LogCategory
+  amount               Int?
+  emotion_type         String?     @db.VarChar(50)
+  journal_content      String?     @db.Text
+  duration_minutes     Int?
+  burned_calories_kcal Int?        @default(0)
+  earned_fuel          Int         @default(10)
+  client_request_id    String?     @unique(map: "uk_quick_log_client_request_id") @db.VarChar(64)
+  created_at           DateTime    @default(now()) @db.Timestamp(0)
+  deleted_at           DateTime?   @db.Timestamp(0)
+
+  user                 users       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)], map: "idx_quick_log_user_created")
+}
+
+model user_planet_progress {
+  user_id         Int
+  planet_id       String               @db.VarChar(20)
+  distance        Int                  @default(100)
+  status          PlanetProgressStatus @default(READY)
+  last_arrived_at DateTime?            @db.Timestamp(0)
+  trip_count      Int                  @default(0)
+  updated_at      DateTime             @default(now()) @updatedAt @db.Timestamp(0)
+
+  user            users                @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, planet_id])
+}
+
+model fuel_logs {
+  id                BigInt   @id @default(autoincrement())
+  user_id           Int
+  amount            Int
+  source            String   @db.VarChar(30)
+  source_ref_id     BigInt?
+  client_request_id String?  @unique(map: "uk_fuel_log_client_request_id") @db.VarChar(64)
+  created_at        DateTime @default(now()) @db.Timestamp(0)
+
+  user              users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)], map: "idx_fuel_log_user_created")
+}
+
+model monthly_retro_reports {
+  id             BigInt   @id @default(autoincrement())
+  user_id        Int
+  year_month     String   @db.Char(7)
+  wellness_score Int?
+  content_json   Json
+  generated_at   DateTime @default(now()) @db.Timestamp(0)
+
+  user           users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, year_month], map: "uk_monthly_retro_user_month")
+}
+
+model planet_reports {
+  id                   BigInt   @id @default(autoincrement())
+  report_uuid          String   @unique(map: "uk_planet_report_uuid") @db.VarChar(64)
+  user_id              Int
+  planet_id            String   @db.VarChar(20)
+  trip_number          Int      @default(1)
+  period_from          DateTime @db.Timestamp(0)
+  period_to            DateTime @db.Timestamp(0)
+  period_days          Int      @default(3)
+  headline             String   @db.VarChar(255)
+  summary              String   @db.Text
+  mindfulness_feedback String?  @db.Text
+  recommendations      Json?
+  wellness_score       Int?
+  stats                Json?
+  activity_breakdown   Json?
+  tammy_motion         String   @default("BOUNCE") @db.VarChar(50)
+  data_density         String   @default("normal") @db.VarChar(20)
+  is_fallback          Boolean  @default(false)
+  created_at           DateTime @default(now()) @db.Timestamp(0)
+
+  user                 users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, planet_id, created_at(sort: Desc)], map: "idx_planet_report_user_planet")
+}
+
+model planets {
+  id            Int        @id @default(autoincrement())
+  name          String     @db.VarChar(100)
+  planet_type   PlanetType
+  required_fuel Int        @default(100)
+  description   String?    @db.Text
+  created_at    DateTime   @default(now()) @db.Timestamp(0)
+
+  // 1:1 특화 테이블 관계
+  meal_planets       meal_planets?
+  water_planets      water_planets?
+  emotion_planets    emotion_planets?
+  lifestyle_planets  lifestyle_planets?
+  retrospect_planets retrospect_planets?
+
+  // 1:N 관계
+  planet_travels     planet_travels[]
+}
+
+model meal_planets {
+  planet_id            Int     @id
+  target_calories_kcal Int     @default(0)
+  target_carbohydrate_g Decimal @default(0.00) @db.Decimal(5, 2)
+  target_protein_g      Decimal @default(0.00) @db.Decimal(5, 2)
+  target_fat_g          Decimal @default(0.00) @db.Decimal(5, 2)
+
+  planet               planets @relation(fields: [planet_id], references: [id], onDelete: Cascade)
+}
+
+model water_planets {
+  planet_id        Int     @id
+  target_water_ml  Int     @default(2000)
+  min_intake_count Int     @default(4)
+
+  planet           planets @relation(fields: [planet_id], references: [id], onDelete: Cascade)
+}
+
+model emotion_planets {
+  planet_id           Int     @id
+  min_empathy_score   Int     @default(0)
+  min_happiness_score Int     @default(0)
+
+  planet              planets @relation(fields: [planet_id], references: [id], onDelete: Cascade)
+}
+
+model lifestyle_planets {
+  planet_id               Int     @id
+  target_workout_duration Int     @default(30)
+  daily_routine_target    Int     @default(1)
+
+  planet                  planets @relation(fields: [planet_id], references: [id], onDelete: Cascade)
+}
+
+model retrospect_planets {
+  planet_id        Int     @id
+  period_days      Int     @default(7)
+  auto_trigger_cron String @default("0 0 * * 0") @db.VarChar(50)
+
+  planet           planets @relation(fields: [planet_id], references: [id], onDelete: Cascade)
+}
+
+model planet_travels {
+  id               BigInt       @id @default(autoincrement())
+  user_id          Int
+  planet_id        Int?
+  planet_type      PlanetType
+  fuel_spent       Int
+  status           TravelStatus @default(IN_PROGRESS)
+  title            String?      @db.VarChar(255)
+  summary_content  String?      @db.Text
+  recommendations  String?      @db.Text
+  started_at       DateTime     @default(now()) @db.Timestamp(0)
+  completed_at     DateTime?    @db.Timestamp(0)
+  deleted_at       DateTime?    @db.Timestamp(0)
+
+  user             users        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  planet           planets?     @relation(fields: [planet_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, started_at(sort: Desc)], map: "idx_travel_user_started")
+}
+
+model foods {
+  id                 Int             @id @default(autoincrement())
+  name               String          @unique @db.VarChar(100)
+  representative_name String?        @db.VarChar(100)
+  standard_serving_g Decimal         @default(100.00) @db.Decimal(6, 2)
+  total_weight_g     Decimal?        @db.Decimal(6, 2)
+  calories_kcal      Int             @default(0)
+  carbohydrate_g     Decimal         @default(0.00) @db.Decimal(5, 2)
+  protein_g          Decimal         @default(0.00) @db.Decimal(5, 2)
+  fat_g              Decimal         @default(0.00) @db.Decimal(5, 2)
+  vitamin_percent    Int             @default(0)
+  mineral_percent    Int             @default(0)
+  category           String?         @db.VarChar(50)
+  created_at         DateTime        @default(now()) @db.Timestamp(0)
+
+  meal_items         meal_items[]
+  food_mappings      food_mappings[]
+}
+
+model food_mappings {
+  id         BigInt    @id @default(autoincrement())
+  raw_name   String    @unique @db.VarChar(100)
+  food_id    Int
+  match_type MatchType @default(EXACT)
+  created_at DateTime  @default(now()) @db.Timestamp(0)
+
+  food       foods     @relation(fields: [food_id], references: [id], onDelete: Cascade)
+
+  @@index([raw_name], map: "idx_food_mapping_raw")
+}
+
+model meals {
+  id                   BigInt       @id @default(autoincrement())
+  user_id              Int
+  meal_type            MealType
+  comment              String?      @db.VarChar(255)
+  total_calories_kcal  Int          @default(0)
+  total_carbohydrate_g Decimal      @default(0.00) @db.Decimal(5, 2)
+  total_protein_g      Decimal      @default(0.00) @db.Decimal(5, 2)
+  total_fat_g          Decimal      @default(0.00) @db.Decimal(5, 2)
+  vitamin_percent      Int          @default(0)
+  mineral_percent      Int          @default(0)
+  registered_at        DateTime     @default(now()) @db.Timestamp(0)
+  deleted_at           DateTime?    @db.Timestamp(0)
+
+  user                 users        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  meal_items           meal_items[]
+  meal_images          meal_images[]
+
+  @@index([user_id, registered_at(sort: Desc)], map: "idx_user_meal_registered")
+}
+
+model meal_images {
+  id         BigInt       @id @default(autoincrement())
+  meal_id    BigInt?
+  image_url  String       @db.VarChar(255)
+  is_cover   Boolean      @default(false)
+  created_at DateTime     @default(now()) @db.Timestamp(0)
+
+  meal       meals?       @relation(fields: [meal_id], references: [id], onDelete: Cascade)
+  meal_items meal_items[]
+
+  @@index([meal_id], map: "idx_meal_image_meal")
+}
+
+model meal_items {
+  id               BigInt       @id @default(autoincrement())
+  meal_id          BigInt
+  meal_image_id    BigInt?
+  food_id          Int?
+  custom_food_name String       @db.VarChar(100)
+  intake_gram      Decimal      @default(100.00) @db.Decimal(6, 2)
+  bounding_box     Json?
+  confidence       Decimal?     @db.Decimal(5, 4)
+
+  meal             meals        @relation(fields: [meal_id], references: [id], onDelete: Cascade)
+  food             foods?       @relation(fields: [food_id], references: [id], onDelete: SetNull)
+  meal_image       meal_images? @relation(fields: [meal_image_id], references: [id], onDelete: SetNull)
+
+  @@index([meal_image_id], map: "idx_meal_item_image")
+}
+
+model chat_messages {
+  id           BigInt   @id @default(autoincrement())
+  user_id      Int
+  sender       Sender
+  message_text String   @db.Text
+  motion_tag   String?  @db.VarChar(50)
+  intent_label String?  @db.VarChar(50)
+  labels       Json?
+  is_deleted   Boolean  @default(false)
+  is_edited    Boolean  @default(false)
+  created_at   DateTime @default(now()) @db.Timestamp(0)
+
+  user         users    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)], map: "idx_user_msg_created")
+  @@index([intent_label], map: "idx_msg_intent_label")
+}
+
+
+
+model proactive_triggers {
+  id           BigInt          @id @default(autoincrement())
+  user_id      Int
+  trigger_type TriggerType
+  reference_id BigInt?
+  message_text String          @db.Text
+  status       ProactiveStatus @default(PENDING)
+  created_at   DateTime        @default(now()) @db.Timestamp(0)
+
+  user         users           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)], map: "idx_user_trigger_created")
+}
+
+model user_action_logs {
+  id                BigInt     @id @default(autoincrement())
+  user_id           Int
+  screen_name       String     @db.VarChar(100)
+  action_type       ActionType
+  target_element_id String?    @db.VarChar(100)
+  metadata          Json?
+  created_at        DateTime   @default(now()) @db.Timestamp(0)
+
+  user              users      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)], map: "idx_action_user_created")
+}
+
+model tammy_status_logs {
+  id                 BigInt       @id @default(autoincrement())
+  user_id            Int
+  change_reason      ChangeReason
+  delta_exp          Int          @default(0)
+  delta_empathy      Int          @default(0)
+  delta_health       Int          @default(0)
+  delta_activity     Int          @default(0)
+  delta_happiness    Int          @default(0)
+  snapshot_level     Int
+  snapshot_total_exp Int
+  created_at         DateTime     @default(now()) @db.Timestamp(0)
+
+  user               users        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at(sort: Desc)], map: "idx_tammy_log_user_created")
+}
+
+model user_push_tokens {
+  id           BigInt     @id @default(autoincrement())
+  user_id      Int
+  device_token String     @db.VarChar(255)
+  device_type  DeviceType @default(IOS)
+  is_active    Boolean    @default(true)
+  updated_at   DateTime   @default(now()) @updatedAt @db.Timestamp(0)
+  created_at   DateTime   @default(now()) @db.Timestamp(0)
+
+  user         users      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, device_token], map: "uq_user_device_token")
+  @@index([user_id], map: "idx_push_token_user")
+}
