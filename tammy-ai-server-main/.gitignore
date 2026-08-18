@@ -1,0 +1,24 @@
+# 환경 변수 (API 키 포함)
+.env
+.env.local
+.env.*.local
+
+# 빌드 산출물
+# 'server'를 앵커 없이 쓰면 cmd/server/ 디렉터리까지 무시되므로 반드시 /를 붙일 것
+/bin/
+/out/
+/server
+
+# Go
+*.test
+*.out
+coverage.html
+
+# 에디터
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code 로컬 설정 (GCP 계정 주소 포함)
+.claude/settings.json
+.claude/settings.local.json

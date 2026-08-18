@@ -1,0 +1,1169 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "웰니스 펫 에이전트 '타미'의 AI 서버입니다. 서비스 서버와 내부 통신하며, 상태를 저장하지 않습니다.\nCloud Run은 인증되지 않은 호출을 허용하며, 접근 제어는 `X-Internal-Api-Key` 헤더가 담당합니다.",
+        "title": "TAMMY AI Server API",
+        "contact": {},
+        "license": {
+            "name": "MIT"
+        },
+        "version": "1.0"
+    },
+    "paths": {
+        "/healthz": {
+            "get": {
+                "description": "Cloud Run 및 로드밸런서용 상태 확인 엔드포인트입니다. 인증이 필요하지 않습니다.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "헬스 체크",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/chat/process": {
+            "post": {
+                "description": "현재 발화와 이전 대화 히스토리를 받아 타미 페르소나로 답변하고, **사용자 발화에 대한 감정 분석 결과**를 함께 반환합니다.\n이 서버는 상태를 저장하지 않으므로 대화 맥락이 필요하면 `history`에 이전 턴을 담아 보내야 합니다.\n`history`는 오래된 순서대로 정렬되어야 하며, 최근 30턴만 모델에 전달됩니다.\n`emotion.state`는 서비스 서버의 `EmotionState` enum(HAPPY, SAD, ANGRY, STRESSED, CALM)과 동일합니다.\n`emotion.motionType`은 타미의 반응 모션입니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "타미 대화 처리 및 감정 분석",
+                "parameters": [
+                    {
+                        "description": "현재 발화와 대화 히스토리",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ChatRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ChatResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "요청 형식 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "모델 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "모델 응답 지연",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/nutrition/lookup": {
+            "post": {
+                "description": "음식 이름 배열을 받아 웹 검색을 통해 각 음식의 칼로리, 탄수화물, 단백질, 지방, 비타민/무기질 충족률을 조사하고 출처를 함께 반환합니다.\n응답의 `items`는 요청한 `foodNames`와 **같은 순서, 같은 개수**로 반환되므로 인덱스로 짝지을 수 있습니다.\n검색으로 확인하지 못한 음식은 수치가 0, `confidence`가 0으로 채워집니다.\n웹 검색과 구조화를 위해 모델을 두 번 호출하므로 다른 엔드포인트보다 응답이 느립니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "nutrition"
+                ],
+                "summary": "음식명 배열로 영양 정보 조회",
+                "parameters": [
+                    {
+                        "description": "조회할 음식명 목록",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.NutritionLookupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.NutritionLookupResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "요청 형식 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "모델 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "모델 응답 지연",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/reports/diet": {
+            "post": {
+                "description": "날짜별 식사 기록을 받아 꾸준히 건강한 식습관을 유지하도록 돕는 리포트를 마크다운으로 반환합니다.\n칭찬할 부분을 먼저 짚고, 아쉬운 부분은 개선 가능성을 강조하는 방식으로 작성됩니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "식습관 리포트",
+                "parameters": [
+                    {
+                        "description": "날짜별 식사 기록",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.DietReportRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ReportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "요청 형식 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "모델 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "모델 응답 지연",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/reports/hydration": {
+            "post": {
+                "description": "수분 섭취 기록을 받아 분석합니다. 원활한 대사에서 수분이 하는 역할을 강조하며 작성됩니다.\n`dailyGoalMl`을 생략하면 1500ml를 기본 목표로 사용합니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "수분 분석 리포트",
+                "parameters": [
+                    {
+                        "description": "수분 섭취 기록",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.HydrationReportRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ReportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "요청 형식 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "모델 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "모델 응답 지연",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/reports/lifestyle": {
+            "post": {
+                "description": "운동/활동 기록을 받아 분석합니다. 격한 운동이 아니라 **가벼운 움직임을 자주** 하는 것이 좋다는 관점으로 작성됩니다.\n`dailySteps`는 날짜(YYYY-MM-DD)를 키로 하는 걸음 수 맵으로, 선택 항목입니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "생활습관 리포트",
+                "parameters": [
+                    {
+                        "description": "운동/활동 기록",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.LifestyleReportRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ReportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "요청 형식 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "모델 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "모델 응답 지연",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/reports/mindfulness": {
+            "post": {
+                "description": "감정 기록(퀵버튼), 대화 로그, 감정일기를 받아 심리적 측면에서 분석합니다. 세 소스는 모두 선택이며, 사용자가 실제로 남긴 것만 보내면 됩니다.\n감정적 식사 신호, 힘들었던 일, 감정의 변화를 중심으로 작성되며, 일기가 있으면 리포트의 중심에 둡니다.\n일기 원문은 가장 민감한 입력입니다. 어떤 로그에도 기록되지 않으며 `diaryId`는 모델에 전달되지 않습니다.\n심리 진단은 수행하지 않으며, 위험 신호가 반복되면 전문가 상담을 부드럽게 권합니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "마음챙김 리포트",
+                "parameters": [
+                    {
+                        "description": "감정 기록 · 대화 로그 · 감정일기",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.MindfulnessReportRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ReportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "요청 형식 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "모델 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "모델 응답 지연",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/reports/retrospective": {
+            "post": {
+                "description": "전체 대화 로그와 함께 식사/활동/수분/감정 기록을 받아 웰니스 관점에서 네 가지 측면을 다각도로 분석합니다.\n서비스 서버는 이 리포트를 매월 1일에 발행하므로 `period`는 보통 한 달입니다.\n각 측면을 개별적으로 보는 것이 아니라 **서로 어떻게 연결되는지**에 초점을 맞춥니다.\n입력이 가장 큰 엔드포인트이므로 응답 시간이 가장 깁니다. 서비스 서버에서는 비동기 처리를 권장합니다.\n대화 로그는 최근 400턴까지만 모델에 전달됩니다.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "장기 회고 리포트",
+                "parameters": [
+                    {
+                        "description": "전체 기록",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.RetrospectiveReportRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ReportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "요청 형식 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "모델 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "504": {
+                        "description": "모델 응답 지연",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/vision/analyze-food": {
+            "post": {
+                "description": "이미지를 받아 사진 속 음식을 모두 인식하고, 각 음식의 이름과 정규화된 바운딩 박스 좌표를 반환합니다.\n`imageUrl` 또는 `imageBase64` 중 하나는 반드시 필요하며, 둘 다 주어지면 `imageBase64`가 우선합니다.\n바운딩 박스는 이미지 크기와 무관한 0.0~1.0 정규화 좌표입니다.\n영양 정보는 이 엔드포인트에서 제공하지 않습니다. 반환된 음식명으로 `/v1/nutrition/lookup`을 호출하세요.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vision"
+                ],
+                "summary": "음식 이미지 분석 및 음식명/바운딩박스 추출",
+                "parameters": [
+                    {
+                        "description": "분석할 이미지",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.VisionAnalyzeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.VisionAnalyzeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "요청 형식 오류 또는 이미지 누락",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "이미지 용량 초과",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "지원하지 않는 이미지 형식",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "이미지 다운로드 실패 또는 모델 오류",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.BoundingBox": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "number",
+                    "example": 0.38
+                },
+                "width": {
+                    "type": "number",
+                    "example": 0.44
+                },
+                "x": {
+                    "type": "number",
+                    "example": 0.12
+                },
+                "y": {
+                    "type": "number",
+                    "example": 0.3
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.ChatRequest": {
+            "type": "object",
+            "required": [
+                "userId",
+                "userMessage"
+            ],
+            "properties": {
+                "history": {
+                    "description": "Prior turns in chronological order, oldest first. May be empty.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ChatTurn"
+                    }
+                },
+                "nickname": {
+                    "description": "Optional display name so Tammy can address the user naturally.",
+                    "type": "string",
+                    "example": "우당탕탕"
+                },
+                "userId": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "userMessage": {
+                    "type": "string",
+                    "example": "오늘 회사에서 일이 너무 많아서 힘들고 지쳤어"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.ChatResponse": {
+            "type": "object",
+            "properties": {
+                "emotion": {
+                    "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.EmotionStatus"
+                },
+                "replyText": {
+                    "type": "string",
+                    "example": "오늘 정말 많이 힘들었구나. 괜찮아, 우리 잠깐 바람 쐬러 갈까?"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.ChatTurn": {
+            "type": "object",
+            "required": [
+                "role",
+                "text"
+            ],
+            "properties": {
+                "createdAt": {
+                    "description": "RFC3339 timestamp. Optional; used only to give the model a sense of pacing.",
+                    "type": "string",
+                    "example": "2026-08-05T21:14:00Z"
+                },
+                "role": {
+                    "description": "Either \"user\" or \"tammy\".",
+                    "type": "string",
+                    "enum": [
+                        "user",
+                        "tammy"
+                    ],
+                    "example": "user"
+                },
+                "text": {
+                    "type": "string",
+                    "example": "오늘 야근해서 너무 지쳤어"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.DailyDietRecord": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "example": "2026-08-05"
+                },
+                "meals": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.MealEntry"
+                    }
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.DetectedFood": {
+            "type": "object",
+            "properties": {
+                "boundingBox": {
+                    "description": "Normalized location of this item in the image.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.BoundingBox"
+                        }
+                    ]
+                },
+                "confidence": {
+                    "description": "Model confidence in the range [0, 1].",
+                    "type": "number",
+                    "example": 0.92
+                },
+                "name": {
+                    "description": "Korean food name, as the user would call it.",
+                    "type": "string",
+                    "example": "김치찌개"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.DietReportRequest": {
+            "type": "object",
+            "required": [
+                "dailyRecords",
+                "userId"
+            ],
+            "properties": {
+                "dailyRecords": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.DailyDietRecord"
+                    }
+                },
+                "dataDensity": {
+                    "type": "string",
+                    "enum": [
+                        "thin",
+                        "normal",
+                        "rich"
+                    ],
+                    "example": "normal"
+                },
+                "nickname": {
+                    "type": "string",
+                    "example": "우당탕탕"
+                },
+                "period": {
+                    "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.Period"
+                },
+                "userId": {
+                    "type": "integer",
+                    "example": 12
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.EmotionDiary": {
+            "type": "object",
+            "required": [
+                "content"
+            ],
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "example": "오늘은 프로젝트 마감이 다가와서 부담이 컸다."
+                },
+                "date": {
+                    "type": "string",
+                    "example": "2026-08-05"
+                },
+                "diaryId": {
+                    "type": "integer",
+                    "example": 331
+                },
+                "mood": {
+                    "description": "One of HAPPY, SAD, ANGRY, STRESSED, CALM.",
+                    "type": "string",
+                    "example": "STRESSED"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.EmotionRecord": {
+            "type": "object",
+            "required": [
+                "emotion"
+            ],
+            "properties": {
+                "emotion": {
+                    "description": "One of HAPPY, SAD, ANGRY, STRESSED, CALM.",
+                    "type": "string",
+                    "enum": [
+                        "HAPPY",
+                        "SAD",
+                        "ANGRY",
+                        "STRESSED",
+                        "CALM"
+                    ],
+                    "example": "STRESSED"
+                },
+                "recordedAt": {
+                    "description": "RFC3339 timestamp, optional; lets the report comment on timing.",
+                    "type": "string",
+                    "example": "2026-08-05T21:00:00+09:00"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.EmotionStatus": {
+            "type": "object",
+            "properties": {
+                "motionType": {
+                    "description": "Tammy's reaction animation, one of the MotionType values.",
+                    "type": "string",
+                    "example": "PAT_PAT_HEAD"
+                },
+                "state": {
+                    "description": "One of HAPPY, SAD, ANGRY, STRESSED, CALM — matching the service server's\nEmotionState enum so it can be written straight into emotion_logs.",
+                    "type": "string",
+                    "example": "STRESSED"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "AI_MODEL_ERROR"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "AI 모델 호출에 실패했습니다."
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.ExerciseEntry": {
+            "type": "object",
+            "properties": {
+                "burnedCaloriesKcal": {
+                    "type": "number",
+                    "example": 96
+                },
+                "date": {
+                    "type": "string",
+                    "example": "2026-08-05"
+                },
+                "durationMinutes": {
+                    "type": "integer",
+                    "example": 25
+                },
+                "exerciseName": {
+                    "type": "string",
+                    "example": "걷기"
+                },
+                "isCompleted": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.FoodEntry": {
+            "type": "object",
+            "properties": {
+                "caloriesKcal": {
+                    "type": "number",
+                    "example": 243
+                },
+                "carbohydrateG": {
+                    "type": "number",
+                    "example": 12.4
+                },
+                "fatG": {
+                    "type": "number",
+                    "example": 13.8
+                },
+                "name": {
+                    "type": "string",
+                    "example": "김치찌개"
+                },
+                "proteinG": {
+                    "type": "number",
+                    "example": 15.2
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.HydrationReportRequest": {
+            "type": "object",
+            "required": [
+                "userId",
+                "waterLogs"
+            ],
+            "properties": {
+                "dailyGoalMl": {
+                    "description": "Daily target in millilitres. Defaults to 1500 when omitted.",
+                    "type": "integer",
+                    "example": 1500
+                },
+                "dataDensity": {
+                    "type": "string",
+                    "enum": [
+                        "thin",
+                        "normal",
+                        "rich"
+                    ],
+                    "example": "normal"
+                },
+                "nickname": {
+                    "type": "string",
+                    "example": "우당탕탕"
+                },
+                "period": {
+                    "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.Period"
+                },
+                "userId": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "waterLogs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.WaterEntry"
+                    }
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.LifestyleReportRequest": {
+            "type": "object",
+            "required": [
+                "exerciseLogs",
+                "userId"
+            ],
+            "properties": {
+                "dailySteps": {
+                    "description": "Optional step counts by date, when the client can supply them.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "dataDensity": {
+                    "type": "string",
+                    "enum": [
+                        "thin",
+                        "normal",
+                        "rich"
+                    ],
+                    "example": "normal"
+                },
+                "exerciseLogs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ExerciseEntry"
+                    }
+                },
+                "nickname": {
+                    "type": "string",
+                    "example": "우당탕탕"
+                },
+                "period": {
+                    "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.Period"
+                },
+                "userId": {
+                    "type": "integer",
+                    "example": 12
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.MealEntry": {
+            "type": "object",
+            "properties": {
+                "foods": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.FoodEntry"
+                    }
+                },
+                "mealType": {
+                    "description": "One of BREAKFAST, LUNCH, DINNER, SNACK.",
+                    "type": "string",
+                    "example": "LUNCH"
+                },
+                "registeredAt": {
+                    "description": "RFC3339 timestamp of the meal, optional.",
+                    "type": "string",
+                    "example": "2026-08-05T12:30:00Z"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.MindfulnessReportRequest": {
+            "type": "object",
+            "required": [
+                "userId"
+            ],
+            "properties": {
+                "chatLogs": {
+                    "description": "Prior turns in chronological order, oldest first.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ChatTurn"
+                    }
+                },
+                "dataDensity": {
+                    "type": "string",
+                    "enum": [
+                        "thin",
+                        "normal",
+                        "rich"
+                    ],
+                    "example": "normal"
+                },
+                "diaries": {
+                    "description": "Diary entries, oldest first.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.EmotionDiary"
+                    }
+                },
+                "emotionRecords": {
+                    "description": "Quick-button taps, which carry an emotion but no text.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.EmotionRecord"
+                    }
+                },
+                "nickname": {
+                    "type": "string",
+                    "example": "우당탕탕"
+                },
+                "period": {
+                    "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.Period"
+                },
+                "userId": {
+                    "type": "integer",
+                    "example": 12
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.NutritionItem": {
+            "type": "object",
+            "properties": {
+                "caloriesKcal": {
+                    "type": "number",
+                    "example": 243
+                },
+                "carbohydrateG": {
+                    "type": "number",
+                    "example": 12.4
+                },
+                "confidence": {
+                    "description": "Model confidence in the range [0, 1].",
+                    "type": "number",
+                    "example": 0.81
+                },
+                "fatG": {
+                    "type": "number",
+                    "example": 13.8
+                },
+                "mineralPercent": {
+                    "type": "integer",
+                    "example": 42
+                },
+                "name": {
+                    "type": "string",
+                    "example": "김치찌개"
+                },
+                "proteinG": {
+                    "type": "number",
+                    "example": 15.2
+                },
+                "servingSizeG": {
+                    "description": "Serving the figures below describe, in grams.",
+                    "type": "number",
+                    "example": 400
+                },
+                "sources": {
+                    "description": "Where the figures came from. May be empty when the model fell back to\ngeneral knowledge, in which case Confidence will be low.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.NutritionSource"
+                    }
+                },
+                "vitaminPercent": {
+                    "type": "integer",
+                    "example": 35
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.NutritionLookupRequest": {
+            "type": "object",
+            "required": [
+                "foodNames"
+            ],
+            "properties": {
+                "foodNames": {
+                    "description": "Food names to research. Must contain at least one entry.",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "김치찌개",
+                        "공기밥"
+                    ]
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.NutritionLookupResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.NutritionItem"
+                    }
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.NutritionSource": {
+            "type": "object",
+            "properties": {
+                "publisher": {
+                    "type": "string",
+                    "example": "식품의약품안전처"
+                },
+                "title": {
+                    "type": "string",
+                    "example": "식품영양성분 데이터베이스 - 김치찌개"
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://various.foodsafetykorea.go.kr/nutrient/"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.Period": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "string",
+                    "example": "2026-08-05"
+                },
+                "start": {
+                    "type": "string",
+                    "example": "2026-07-29"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.ReportResponse": {
+            "type": "object",
+            "properties": {
+                "markdown": {
+                    "description": "The report body as a Markdown string, written in Tammy's voice.",
+                    "type": "string"
+                },
+                "nextActionChecks": {
+                    "description": "Short, concrete, opt-in suggestions. Never phrased as commands.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "내일 아침엔 물 한 잔부터 시작해볼까?"
+                    ]
+                },
+                "title": {
+                    "type": "string",
+                    "example": "우당탕탕님의 이번 주 식습관 이야기 🌱"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.RetrospectiveReportRequest": {
+            "type": "object",
+            "required": [
+                "userId"
+            ],
+            "properties": {
+                "chatLogs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ChatTurn"
+                    }
+                },
+                "dailyRecords": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.DailyDietRecord"
+                    }
+                },
+                "dataDensity": {
+                    "type": "string",
+                    "enum": [
+                        "thin",
+                        "normal",
+                        "rich"
+                    ],
+                    "example": "rich"
+                },
+                "diaries": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.EmotionDiary"
+                    }
+                },
+                "emotionRecords": {
+                    "description": "Emotional inputs, mirroring the mindfulness report.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.EmotionRecord"
+                    }
+                },
+                "exerciseLogs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.ExerciseEntry"
+                    }
+                },
+                "nickname": {
+                    "type": "string",
+                    "example": "우당탕탕"
+                },
+                "period": {
+                    "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.Period"
+                },
+                "userId": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "waterLogs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.WaterEntry"
+                    }
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.VisionAnalyzeRequest": {
+            "type": "object",
+            "properties": {
+                "imageBase64": {
+                    "description": "Base64 encoded image bytes. A `data:` URI prefix is accepted and stripped.",
+                    "type": "string"
+                },
+                "imageUrl": {
+                    "description": "Publicly reachable image URL. Mutually exclusive with imageBase64.",
+                    "type": "string",
+                    "example": "https://storage.googleapis.com/tammy/meal_1.jpg"
+                },
+                "mealType": {
+                    "description": "Optional meal context that helps disambiguate similar dishes.\nOne of BREAKFAST, LUNCH, DINNER, SNACK.",
+                    "type": "string",
+                    "example": "LUNCH"
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.VisionAnalyzeResponse": {
+            "type": "object",
+            "properties": {
+                "comment": {
+                    "description": "A short Tammy-voice remark about the meal.",
+                    "type": "string",
+                    "example": "오늘 점심 든든하게 챙겼구나, 좋다!"
+                },
+                "foods": {
+                    "description": "Every food item found, in reading order. Empty when isIdentified is false.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_yeongin-ji_tammy-ai-server_internal_dto.DetectedFood"
+                    }
+                },
+                "isIdentified": {
+                    "description": "False when no food could be recognized; the service server then shows\nits manual-input fallback UI.",
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "github_com_yeongin-ji_tammy-ai-server_internal_dto.WaterEntry": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "example": "2026-08-05"
+                },
+                "intakeMl": {
+                    "type": "integer",
+                    "example": 250
+                },
+                "recordedAt": {
+                    "description": "RFC3339 timestamp, optional; lets the report comment on timing.",
+                    "type": "string",
+                    "example": "2026-08-05T09:10:00Z"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "InternalApiKey": {
+            "description": "서비스 서버와 공유하는 내부 API 키",
+            "type": "apiKey",
+            "name": "X-Internal-Api-Key",
+            "in": "header"
+        }
+    }
+}
