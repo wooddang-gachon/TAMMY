@@ -407,9 +407,10 @@ erDiagram
 
     food_mappings {
         bigint id PK
-        string raw_name UK
+        string raw_name UK "idx_food_mapping_raw"
         int food_id FK
-        enum match_type "EXACT, ALIAS, SIMILARITY"
+        enum match_type "EXACT, ALIAS, USER_CONFIRMED"
+        datetime created_at
     }
 
     chat_messages {
@@ -455,7 +456,36 @@ erDiagram
   - `planet_reports`, `monthly_retro_reports`: 행성별 및 월간 AI 심층 리포트(JSON).
   - `chat_messages`: 대화 내역, 감정 라벨, 모션 태그(`motion_tag`).
 
-#### 1.2 AI 서버 계약 모델 (Stateless DTO)
+#### 1.2 영양 매칭 및 매핑 테이블 세부 설계 (`foods` & `food_mappings`)
+
+식약처 국가 표준 영양 데이터베이스(15,000건)의 무결성을 유지하면서, 사용자의 비정형 음식명 입력을 고속으로 캐싱·연결하기 위한 2계층 분리 매핑 테이블 설계입니다.
+
+| 테이블 | 필드명 | 타입 | 제약조건 / 인덱스 | 설명 |
+| :--- | :--- | :--- | :--- | :--- |
+| **`foods`**<br/>*(식약처 마스터 DB)* | `id` | Int | PK, Auto Increment | 고유 음식 식별자 |
+| | `name` | VarChar(100) | Unique | 식약처 표준 음식명 (예: '닭갈비') |
+| | `representative_name` | VarChar(100) | Nullable | 상위 대표 음식 분류명 |
+| | `standard_serving_g` | Decimal(6,2) | Default 100.00 | 1회 기준 제공량 (g) |
+| | `calories_kcal` | Int | Default 0 | 1회 제공량당 열량 (kcal) |
+| | `carbohydrate_g` | Decimal(5,2) | Default 0.00 | 탄수화물 함량 (g) |
+| | `protein_g` | Decimal(5,2) | Default 0.00 | 단백질 함량 (g) |
+| | `fat_g` | Decimal(5,2) | Default 0.00 | 지방 함량 (g) |
+| | `category` | VarChar(50) | Nullable | 식품 대분류 카테고리 |
+| **`food_mappings`**<br/>*(중간 매칭/캐싱)* | `id` | BigInt | PK, Auto Increment | 매핑 레코드 고유 ID |
+| | `raw_name` | VarChar(100) | Unique (`idx_food_mapping_raw`) | 사용자가 입력하거나 비전이 추출한 원본 문자열 |
+| | `food_id` | Int | FK (`foods.id`), On Delete Cascade | 매핑된 식약처 표준 음식 ID |
+| | `match_type` | Enum | `EXACT`, `ALIAS`, `USER_CONFIRMED` | 매칭 유형 및 신뢰도 구분 |
+| | `created_at` | DateTime | Timestamp | 매핑 생성 일시 |
+
+- **`MatchType` 3종 정의 및 상태 전이**:
+  - `EXACT`: 사용자 입력 문자열이 식약처 표준 음식명(`foods.name`)과 100% 철자 일치하는 경우.
+  - `ALIAS`: `FoodTokenizer`에 의해 수식어(매운, 치즈 등) 및 수량 단위가 정규화된 후 마스터 키워드와 매칭되어 자동 생성된 별칭 캐시.
+  - `USER_CONFIRMED`: AI 추정치 또는 검색 후보 중 사용자가 UI 모달에서 수동으로 선택하여 최종 확정한 사용자 검증 매핑.
+- **인덱싱 및 성능 최적화**:
+  - `food_mappings.raw_name`에 B-Tree 유니크 인덱스(`idx_food_mapping_raw`)를 설정하여, 동일한 음식명이 재입력될 때 식약처 마스터 전체 검색 없이 **O(1) 시간 복잡도로 즉각적인 캐시 히트(Cache Hit)**를 달성합니다.
+  - 마스터 테이블(`foods`)에 대한 불필요한 쓰기(Insert/Update)를 원천 차단하여(Master Protection Principle), 다중 사용자의 동시 식단 기록 시 발생하는 DB 락(Lock) 경합을 방지합니다.
+
+#### 1.3 AI 서버 계약 모델 (Stateless DTO)
 AI 서버는 저장소를 갖지 않으며 DTO가 공개 계약입니다. 감정 상태(`HAPPY`, `SAD`, `ANGRY`, `STRESSED`, `CALM`)는 서비스 서버 Prisma `EmotionState` enum과 100% 일치하도록 보정되어 전달됩니다.
 
 ### 2. 핵심 API 명세 (API Specification)
