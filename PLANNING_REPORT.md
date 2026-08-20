@@ -129,7 +129,7 @@
 - 클라이언트는 AI 서버를 직접 호출하지 않으며, 서비스 서버가 `X-Internal-Api-Key` 헤더를 붙여 내부 통신합니다.
 - AI 서버는 DB에 직접 접근하지 않고 필요한 컨텍스트를 요청 본문으로 전달받아 처리하는 완전한 무상태(Stateless) 구조입니다.
 
-### 2. 핵심 사용자 흐름 (User Flow)
+### 2. 핵심 사용자 흐름 (User Flow / User Journey)
 
 - **Step 1 (기록)**: 음식 사진 촬영(Food Scan) 또는 1-Tap 물/감정/운동 기록.
 - **Step 2 (판별 & 보상)**: ONNX 즉시 검출 및 식약처 DB 매핑(예외 시 Cloud AI 비전/영양 파이프라인 가동) → Fuel +10 충전 및 행성 거리 감소 → 픽셀 타미 리액션 & 보상 토스트.
@@ -143,13 +143,153 @@
 
 ### 3. 주요 비즈니스 로직 및 정책
 
-#### 3.1 3M 기반 게이미피케이션 정책
-- **'3M' 기반 2-게이지 밸런스 정책**:
-  - Meal(식사), Mobility(운동/활동), Mentation(수분/감정) 등 일상 속 3M 실천 10~20회 시 정확히 1개 행성 완주 및 100 Fuel이 충전되도록 설계.
-- **출발/도착 상태 전이**:
-  - `READY` → `TRAVELING` (100 Fuel 즉시 차감, 워프 중 남긴 기록은 차기 사이클 적립) → `ARRIVED` (거리 100 리셋 및 리포트 비동기 생성).
+#### 3.1 토크나이저 기반 영양 DB 매칭 및 마스터 보호 정책
 
-#### 3.2 AI 및 데이터 처리 정책
+```mermaid
+flowchart TD
+    A["사용자 입력 / 비전 추출 텍스트<br/>(예: '매운 치즈 닭갈비 2인분')"] --> B["FoodTokenizer 전처리"]
+    B --> B1["수식어 분리 ('매운', '치즈')<br/>수량 단위 분리 ('2인분')<br/>핵심명 추출: '닭갈비'"]
+    
+    B1 --> C{"1단계: food_mappings<br/>캐시 테이블 조회"}
+    C -- "Cache Hit (EXACT/ALIAS)" --> D["매핑된 영양 정보 반환"]
+    
+    C -- "Cache Miss" --> E{"2단계: foods 마스터 DB<br/>핵심명/키워드 검색"}
+    E -- "Master Match" --> F["food_mappings에<br/>ALIAS 연결 캐싱 등록<br/>(Master DB 불변 유지)"]
+    F --> G["식약처 표준 영양 데이터 반환"]
+    
+    E -- "Master Miss" --> H["3단계: AI 서버 Fallback<br/>(POST /v1/nutrition/lookup)"]
+    H --> I["Google Search Grounding<br/>웹 검색 기반 영양 조회"]
+    I --> J["AI 추정 영양 데이터 반환<br/>(isAiFallback: true)"]
+    
+    D --> K["섭취량(Gram) 비례 영양소 환산<br/>ratio = intakeGram / standardServingG<br/>식사 총합 집계"]
+    G --> K
+    J --> K
+```
+
+- **음식명 토크나이저 (`FoodTokenizer`)**:
+  - 사용자 입력 및 비전 모델 추출 텍스트에서 20여 종의 수식어/접두어 사전(`FOOD_MODIFIER_DICTIONARY`: 매운, 수제, 치즈, 로제, 직화, 훈제 등)과 수량 정규식(`QUANTITY_PATTERN`: 2인분, 200g, 1그릇 등)을 사전 분리하여 핵심 음식명(`coreFoodName`)을 정규화합니다.
+- **식약처 마스터 DB 보호 3단계 스마트 매칭 (`getOrMapFood`)**:
+  1. **1단계 (캐시 조회)**: `food_mappings` 테이블에서 `raw_name`을 조회하여 기존 매핑 결과(`EXACT` / `ALIAS`)를 O(1)로 반환합니다.
+  2. **2단계 (토크나이저 마스터 검색)**: 정규화된 `coreFoodName`으로 `foods` 마스터 테이블(1.5만 건)을 검색합니다. 매칭 성공 시 `foods` 테이블은 일체 수정하지 않고 `food_mappings`에 `ALIAS`로 연결 레코드를 자동 캐싱 등록합니다 (**Master Protection Principle**).
+  3. **3단계 (AI 웹 검색 Fallback)**: 마스터 DB에 상위 개념조차 없는 희귀/신메뉴는 AI 서버(`/v1/nutrition/lookup`) 웹 검색 그라운딩 영양 조회를 호출하여 안전하게 반환합니다 (`isAiFallback: true`).
+- **섭취량(Gram) 비례 영양소 계산 공식**:
+  - `ratio = intakeGram / standardServingG (기본 100g)`
+  - 칼로리 및 3대 영양소(탄수화물, 단백질, 지방), 비타민/무기질%를 섭취량 비율에 맞게 정수로 반올림 환산하여 식사 단위로 합산 집계합니다.
+
+#### 3.2 2-게이지 보상 체계 및 5대 행성 차등 거리 단축 정책
+
+```mermaid
+stateDiagram-v2
+    [*] --> READY: 행성 초기화 (Distance: 100)
+
+    state READY {
+        [*] --> Logging: 일상 3M 활동 실천
+        Logging --> Logging: 식단 확정 (+50 Fuel, -10 Distance)<br/>1-Tap 퀵로그 (+10 Fuel, -5~-10 Distance)<br/>타미 대화 (+10 Fuel, -5 Distance)
+    }
+
+    READY --> TRAVELING: 출발 (Fuel == 100 & Distance == 0 달성)<br/>POST /planet-travel/start (Fuel 100 차감)
+    
+    state TRAVELING {
+        direction TB
+        Warping: 우주선 워프 항해 중
+        Warping --> DeferredLogging: 추가 3M 기록 시<br/>차기 사이클로 적립 이월
+    }
+
+    TRAVELING --> ARRIVED: 도착 확인 (POST /planet-travel/arrive)
+    
+    state ARRIVED {
+        Reset: 해당 행성 Distance 100 리셋
+        AsyncJob: AsyncQueue 비동기 리포트 생성 잡 등록
+        Generate: AI 심층 웰니스 리포트 생성 및 저장
+    }
+
+    ARRIVED --> READY: 다음 탐사 준비 완료
+```
+
+- **행동별 보상 체계 (`gamification.ts`)**:
+  - **식단 확정 등록 (`FOOD_CONFIRM`)**: **+50 Fuel**, **+30 EXP**
+  - **1-Tap 퀵로그 (`QUICK_LOG`)**: **+10 Fuel** (수분, 감정, 일기, 운동)
+  - **타미 대화 참여 (`CHAT`)**: **+10 Fuel**
+- **행동별 5대 행성 차등 거리 단축 (`DISTANCE_REDUCTIONS`)**:
+  - **식단 확정 (`MEAL_CONFIRM`)**: 식단 탐사 별 **-10 Distance**
+  - **1-Tap 물 기록 (`WATER_LOG`)**: 수분 탐사 별 **-5 Distance**
+  - **1-Tap 감정 기록 (`EMOTION_QUICK`)**: 감정 대화 별 **-5 Distance**
+  - **타미 공감 대화 (`CHAT_EMOTION`)**: 감정 대화 별 **-5 Distance**
+  - **한 줄 감정일기 (`EMOTION_DIARY`)**: 감정 대화 별 **-10 Distance** (깊은 멘탈케어 가중치)
+  - **운동 타이머 완료 (`EXERCISE_LOG`)**: 라이프스타일 별 **-10 Distance**
+- **출발/도착 상태 전이 및 동시성 제어**:
+  - **출발 (`POST /planet-travel/start`)**: `required_fuel`(100) 즉시 차감 및 상태 `TRAVELING` 전이. 이미 `IN_PROGRESS`인 탐사가 존재할 경우 중복 탐사가 차단됩니다 (`400 ALREADY_IN_PROGRESS_TRAVEL`).
+  - **도착 및 리포트**: 행성 Distance 100 리셋, 상태 `ARRIVED` 전이 및 비동기 AI 리포트 생성 잡이 큐에 등록됩니다. 워프 도중 남긴 기록은 차기 탐사 사이클로 안전하게 이월 적립됩니다.
+
+#### 3.3 로컬 ONNX 추론 및 하이브리드 비전 폴백 정책
+
+```mermaid
+flowchart TD
+    A["식단 사진 업로드<br/>(Client -> Service Server)"] --> B["Sharp 이미지 전처리<br/>(640x640 Float32 NCHW Tensor 정규화)"]
+    
+    B --> C["1단계: 로컬 ONNX Runtime 고속 추론<br/>(YOLOv8 best.onnx, 300~500ms, 비용 $0)"]
+    
+    C --> D{"로컬 검출 판정<br/>(Confidence >= 0.60 & 객체 탐지 성공?)"}
+    
+    D -- "성공 (단일/표준 식단)" --> E["로컬 바운딩 박스 & 음식명 확정<br/>(scanEngine: 'YOLO')"]
+    
+    D -- "실패 / 저신뢰도 (객체 0개 또는 신뢰도 < 0.60)" --> F["2단계: Cloud AI 서버 Fallback<br/>(POST /v1/vision/analyze-food)"]
+    F --> G["Gemini 3.5 Flash Lite Vision<br/>다중 음식 객체 정밀 멀티모달 인식"]
+    G --> H["[ymin, xmin, ymax, xmax] 2D 좌표<br/>0.0~1.0 실수 정규화 변환 & 클램프<br/>(scanEngine: 'VisionLLM')"]
+    
+    E --> I["FoodService.getOrMapFood<br/>식약처 마스터 DB 3단계 매핑 연계"]
+    H --> I
+```
+
+- **로컬 ONNX Runtime 1차 고속 추론**:
+  - `Sharp` 라이브러리를 통해 업로드된 이미지를 640×640 해상도 정규화 텐서로 전처리한 후, 서비스 서버 내장 `best.onnx` 모델로 300~500ms 이내에 주요 음식을 1차 로컬 검출(API 비용 $0 및 초저지연 달성)합니다.
+- **클라우드 멀티모달 LLM 2차 폴백 연계**:
+  - 로컬 검출 신뢰도가 임계값(0.60) 미만이거나 다품종 복합 식단인 경우, Cloud AI 서버의 Gemini 3.5 Flash Lite Vision(`/v1/vision/analyze-food`)으로 자동 폴백하여 고정밀 다중 음식 객체 인식 및 바운딩 박스 정규화 좌표(0.0~1.0)를 반환받습니다.
+
+#### 3.4 대화 컨텍스트 윈도우 및 메모리 캡슐(Memory Capsule) 분리 정책
+- **10턴 슬라이딩 윈도우**: 최근 10개의 대화 히스토리만 선별하여 AI 서버에 전달하며, DB 조회 실패 시에도 빈 배열로 Graceful degradation을 보장합니다.
+- **메모리 캡슐(Memory Capsule) 추출**: AI 대화 중 사용자의 중요한 취향이나 일상 맥락이 발견되면 `extractedMemory`를 추출하여 별도 저장하고 개인화 대화에 활용합니다.
+
+#### 3.5 선제적 안부 트리거(Proactive Trigger) 및 주기적 스케줄링 정책
+- **미기록 감지 스케줄러 (매일 23:30)**:
+  - 당일 수분 기록이 0건인 사용자를 자동 감지하여 `NO_WATER` 안부 트리거를 생성(`status: PENDING`)하고 익일 타미의 선제적 말걸기를 유도합니다.
+- **30-Day TTL 데이터 파기 (매월 1일 01:00)**:
+  - 30일이 경과한 미처리 안부 트리거 레코드를 자동으로 영구 삭제하여 데이터베이스를 최적화합니다.
+- **균형 보정 웰니스 스코어(Wellness Score, 0~100점) 산출 엔진**:
+  
+  **1단계: 4대 영역별 상한 기본 점수 (Base Score, 최대 100점)**
+  $$
+  S_{\text{base}} = \min(25, N_{\text{meal}} \times 5.5) + \min(25, N_{\text{water}} \times 4.1) + \min(25, N_{\text{emotion}} \times 5.5) + \min(25, N_{\text{habit}} \times 6.5)
+  $$
+  - $N_{\text{meal}}, N_{\text{water}}, N_{\text{emotion}}, N_{\text{habit}}$: 당월 4대 영역별 행성 완주(도착) 횟수.
+  - 각 영역당 최대 25점으로 상한 클램핑하여 특정 한 영역만 과다 달성하더라도 기본 점수는 최대 100점으로 제한됩니다.
+
+  **2단계: 표준편차 기반 균형 보정 계수 (Balance Factor)**
+  $$
+  \mu = \frac{1}{4} \sum_{i \in \{\text{meal, water, emotion, habit}\}} N_i, \quad \sigma = \sqrt{\frac{1}{4} \sum_{i} (N_i - \mu)^2}
+  $$
+  $$
+  F_{\text{balance}} = \max\left(0.6, \, 1 - \frac{\sigma}{\mu + 1} \times 0.55\right)
+  $$
+  - 4개 영역이 고르게 실천될수록 $\sigma \to 0$이 되어 보정 계수는 $1.0$에 수렴합니다.
+  - 특정 영역에만 치우친 편식형 행동 패턴에는 최대 40% 감점 페널티(하한 $0.6$)를 부과합니다.
+
+  **3단계: 최종 점수 환산 및 영속화 (Final Clamping)**
+  $$
+  S_{\text{wellness}} = 
+  \begin{cases} 
+  0 & (\text{if } \sum N_i = 0) \\
+  \min\left(100, \, \max\left(10, \, \text{round}(S_{\text{base}} \times F_{\text{balance}})\right)\right) & (\text{otherwise})
+  \end{cases}
+  $$
+  - 산출된 점수와 행성별 완주 통계는 `monthly_retro_reports` JSON 아티팩트로 영속화됩니다.
+
+#### 3.6 백엔드 데이터 무결성 및 비동기 작업 큐 정책
+- **No Auto-Create 원칙**: 모든 서비스 계층(Auth, Chat, Food, QuickLog, Travel, User)에서 사용자 식별자 유효성을 선행 검증하며, 미존재 시 `404 UserNotFoundError`를 발생시켜 무단 자동 생성을 엄격히 차단합니다.
+- **멱등성(Idempotency) 보장**: 모바일 네트워크 패킷 재전송에 대비하여 상태 변경 API에 `clientRequestId` 고유 식별자 검증 계층을 구현하여 중복 보상 적립을 방지합니다.
+- **메모리 기반 비동기 큐 (`AsyncQueue`)**: 리포트 생성 등 고부하 비동기 작업은 동시성 2개 제한의 `AsyncQueue` 싱글톤 인스턴스에서 순차 처리하며, 진행률(`progressPercent`)을 실시간 추적 관리합니다.
+
+#### 3.7 AI 및 데이터 처리 정책
 
 | 정책 | 내용 |
 | :--- | :--- |
@@ -187,7 +327,158 @@
 ### 1. 데이터 모델링 (ERD / 스키마)
 
 #### 1.1 서비스 서버 영속 데이터 모델 (Prisma Schema)
-- **주요 엔티티**:
+
+```mermaid
+erDiagram
+    users ||--o| tammy_statuses : "1:1 상태 관리"
+    users ||--o{ user_planet_progress : "5대 행성 탐사 현황"
+    users ||--o{ fuel_logs : "연료 트랜잭션 기록"
+    users ||--o{ quick_logs : "1-Tap 간편 기록"
+    users ||--o{ meals : "식사 및 영양 기록"
+    users ||--o{ chat_messages : "타미 대화 내역"
+    users ||--o{ planet_reports : "행성 도착 AI 리포트"
+    users ||--o{ monthly_retro_reports : "월간 통합 회고"
+
+    meals ||--o{ meal_images : "식사 사진 (1:N)"
+    meals ||--o{ meal_items : "포함 음식 항목 (1:N)"
+    meal_images ||--o{ meal_items : "바운딩 박스 매핑"
+    foods ||--o{ meal_items : "영양 표준 참조"
+    foods ||--o{ food_mappings : "식약처 별칭 매핑"
+
+    users {
+        int id PK
+        string email UK
+        string nickname
+        int current_fuel
+        enum auth_provider
+        enum status
+        datetime created_at
+        datetime deleted_at
+    }
+
+    tammy_statuses {
+        int user_id PK,FK
+        int level
+        int current_exp
+        int empathy_index
+        int health_index
+        int activity_index
+        int happiness_index
+        datetime updated_at
+    }
+
+    user_planet_progress {
+        int user_id PK,FK
+        string planet_id PK
+        int distance
+        enum status "READY, TRAVELING, ARRIVED"
+        int trip_count
+        datetime last_arrived_at
+    }
+
+    fuel_logs {
+        bigint id PK
+        int user_id FK
+        int amount
+        string source
+        string client_request_id UK "멱등성 키"
+        datetime created_at
+    }
+
+    quick_logs {
+        bigint id PK
+        int user_id FK
+        enum category "WATER, EMOTION, JOURNAL, EXERCISE"
+        int amount
+        string emotion_type
+        text journal_content
+        int duration_minutes
+        int earned_fuel
+        string client_request_id UK "멱등성 키"
+        datetime created_at
+    }
+
+    meals {
+        bigint id PK
+        int user_id FK
+        enum meal_type "BREAKFAST, LUNCH, DINNER, SNACK"
+        int total_calories_kcal
+        decimal total_carbohydrate_g
+        decimal total_protein_g
+        decimal total_fat_g
+        datetime registered_at
+    }
+
+    meal_images {
+        bigint id PK
+        bigint meal_id FK
+        string image_url
+        boolean is_cover
+    }
+
+    meal_items {
+        bigint id PK
+        bigint meal_id FK
+        bigint meal_image_id FK
+        int food_id FK
+        string custom_food_name
+        decimal intake_gram
+        json bounding_box
+        decimal confidence
+    }
+
+    foods {
+        int id PK
+        string name UK
+        decimal standard_serving_g
+        int calories_kcal
+        decimal carbohydrate_g
+        decimal protein_g
+        decimal fat_g
+        string category
+    }
+
+    food_mappings {
+        bigint id PK
+        string raw_name UK "idx_food_mapping_raw"
+        int food_id FK
+        enum match_type "EXACT, ALIAS, USER_CONFIRMED"
+        datetime created_at
+    }
+
+    chat_messages {
+        bigint id PK
+        int user_id FK
+        enum sender "USER, TAMMY, TAMMY_AI"
+        text message_text
+        string motion_tag
+        string intent_label
+        datetime created_at
+    }
+
+    planet_reports {
+        bigint id PK
+        string report_uuid UK
+        int user_id FK
+        string planet_id
+        int trip_number
+        string headline
+        text summary
+        datetime period_from
+        datetime period_to
+    }
+
+    monthly_retro_reports {
+        bigint id PK
+        int user_id FK
+        string year_month UK
+        int wellness_score
+        json content_json
+        datetime generated_at
+    }
+```
+
+- **주요 엔티티 설명**:
   - `users`: 계정, 인증 제공자, 전역 잔여 연료(`current_fuel`), 소프트 딜리트(`deleted_at`).
   - `tammy_statuses`: 타미 레벨, EXP, 공감/건강/활동/행복 지수 (1:1).
   - `user_planet_progress`: 5대 행성별 상태(`READY`, `TRAVELING`, `ARRIVED`), 남은 거리(`distance`), 탐사 횟수.
@@ -198,7 +489,36 @@
   - `planet_reports`, `monthly_retro_reports`: 행성별 및 월간 AI 심층 리포트(JSON).
   - `chat_messages`: 대화 내역, 감정 라벨, 모션 태그(`motion_tag`).
 
-#### 1.2 AI 서버 계약 모델 (Stateless DTO)
+#### 1.2 영양 매칭 및 매핑 테이블 세부 설계 (`foods` & `food_mappings`)
+
+식약처 국가 표준 영양 데이터베이스(15,000건)의 무결성을 유지하면서, 사용자의 비정형 음식명 입력을 고속으로 캐싱·연결하기 위한 2계층 분리 매핑 테이블 설계입니다.
+
+| 테이블 | 필드명 | 타입 | 제약조건 / 인덱스 | 설명 |
+| :--- | :--- | :--- | :--- | :--- |
+| **`foods`**<br/>*(식약처 마스터 DB)* | `id` | Int | PK, Auto Increment | 고유 음식 식별자 |
+| | `name` | VarChar(100) | Unique | 식약처 표준 음식명 (예: '닭갈비') |
+| | `representative_name` | VarChar(100) | Nullable | 상위 대표 음식 분류명 |
+| | `standard_serving_g` | Decimal(6,2) | Default 100.00 | 1회 기준 제공량 (g) |
+| | `calories_kcal` | Int | Default 0 | 1회 제공량당 열량 (kcal) |
+| | `carbohydrate_g` | Decimal(5,2) | Default 0.00 | 탄수화물 함량 (g) |
+| | `protein_g` | Decimal(5,2) | Default 0.00 | 단백질 함량 (g) |
+| | `fat_g` | Decimal(5,2) | Default 0.00 | 지방 함량 (g) |
+| | `category` | VarChar(50) | Nullable | 식품 대분류 카테고리 |
+| **`food_mappings`**<br/>*(중간 매칭/캐싱)* | `id` | BigInt | PK, Auto Increment | 매핑 레코드 고유 ID |
+| | `raw_name` | VarChar(100) | Unique (`idx_food_mapping_raw`) | 사용자가 입력하거나 비전이 추출한 원본 문자열 |
+| | `food_id` | Int | FK (`foods.id`), On Delete Cascade | 매핑된 식약처 표준 음식 ID |
+| | `match_type` | Enum | `EXACT`, `ALIAS`, `USER_CONFIRMED` | 매칭 유형 및 신뢰도 구분 |
+| | `created_at` | DateTime | Timestamp | 매핑 생성 일시 |
+
+- **`MatchType` 3종 정의 및 상태 전이**:
+  - `EXACT`: 사용자 입력 문자열이 식약처 표준 음식명(`foods.name`)과 100% 철자 일치하는 경우.
+  - `ALIAS`: `FoodTokenizer`에 의해 수식어(매운, 치즈 등) 및 수량 단위가 정규화된 후 마스터 키워드와 매칭되어 자동 생성된 별칭 캐시.
+  - `USER_CONFIRMED`: AI 추정치 또는 검색 후보 중 사용자가 UI 모달에서 수동으로 선택하여 최종 확정한 사용자 검증 매핑.
+- **인덱싱 및 성능 최적화**:
+  - `food_mappings.raw_name`에 B-Tree 유니크 인덱스(`idx_food_mapping_raw`)를 설정하여, 동일한 음식명이 재입력될 때 식약처 마스터 전체 검색 없이 **O(1) 시간 복잡도로 즉각적인 캐시 히트(Cache Hit)**를 달성합니다.
+  - 마스터 테이블(`foods`)에 대한 불필요한 쓰기(Insert/Update)를 원천 차단하여(Master Protection Principle), 다중 사용자의 동시 식단 기록 시 발생하는 DB 락(Lock) 경합을 방지합니다.
+
+#### 1.3 AI 서버 계약 모델 (Stateless DTO)
 AI 서버는 저장소를 갖지 않으며 DTO가 공개 계약입니다. 감정 상태(`HAPPY`, `SAD`, `ANGRY`, `STRESSED`, `CALM`)는 서비스 서버 Prisma `EmotionState` enum과 100% 일치하도록 보정되어 전달됩니다.
 
 ### 2. 핵심 API 명세 (API Specification)
@@ -239,7 +559,7 @@ AI 서버는 저장소를 갖지 않으며 DTO가 공개 계약입니다. 감정
 
 ## Ⅶ. AI 기능 설계
 
-### 1. AI 기능 정의 및 전인적 아키텍처
+### 1. AI 기능 정의 및 목적
 - **설계 철학 ('3M' 대사 회복 통합 케어)**:
   - 타미의 AI 에이전트는 단순 챗봇이 아닌, 《살찌지 않는 몸》[^8]의 **3M(Meal · Mobility · Mentation)** 의학적 철학을 계승하여 **식습관(Nutrition), 운동/활동(Exercise), 수면/생활리듬(Lifestyle), 정신건강(Mindfulness/Emotion)** 영역을 전인적으로 케어합니다.
 - **4대 AI 기능 구성**:
@@ -251,7 +571,7 @@ AI 서버는 저장소를 갖지 않으며 DTO가 공개 계약입니다. 감정
 | **대화** | 공감형 페르소나 응답과 사용자 감정 분석을 1회의 호출로 일괄 처리합니다 |
 | **리포트** | 단순 통계 수치가 아닌 원시 활동 로그를 받아 맥락 중심의 내러티브 회고를 생성합니다 |
 
-### 2. 하이브리드 비전 및 AI 모델 파이프라인
+### 2. AI 모델 및 파이프라인 설계
 
 #### 2.1 하이브리드 비전 2-Tier 파이프라인
 - **Tier 1 (로컬 고속 엔터프라이즈 추론 - Zero-Cost & 0ms Latency)**:
@@ -272,7 +592,7 @@ dotprompt 9개와 공용 partial 2개(`_persona`, `_report_rules`)로 구성하�
 | `nutrition_research` | 0.1 | 검색 결과에 충실한 영양 데이터 추출 |
 | `nutrition_structure` | 0 | 결정적이고 엄격한 JSON 파싱 |
 
-### 3. 공감형 대화 및 프라이버시 엔지니어링
+#### 2.3 공감형 대화 및 프라이버시 엔지니어링
 - **자기 자비(Self-Compassion) 페르소나 (`_persona.prompt`)**:
   - 타미는 엄격한 트레이너가 아닌 따뜻한 픽셀 친구로서, 칼로리 초과나 목표 미달에 대해 비난하거나 죄책감을 주지 않고 정서적 지지와 긍정적 강화를 제공합니다.
 - **실시간 감정 분석 및 스프라이트 모션 매핑**:
@@ -280,7 +600,7 @@ dotprompt 9개와 공용 partial 2개(`_persona`, `_report_rules`)로 구성하�
 - **개인정보 보호 및 식별자 은닉**:
   - 감정일기 본문은 AI 서버 로그에 남기지 않으며, `diaryId`/`userId` 등 시스템 식별자는 프롬프트 주입 단계에서 원천 제거합니다.
 
-### 4. 데이터 밀도(Data Density) 적응형 5대 웰니스 서사 리포팅
+#### 2.4 데이터 밀도(Data Density) 적응형 5대 웰니스 서사 리포팅
 - **3단계 데이터 밀도 적응형 프롬프트 (`dataDensity`)**:
   - `thin` (기록 5개 미만): 짧지만 시작의 가치를 격려하는 압축적 스토리텔링.
   - `normal` (기록 5~20개): 주간 패턴과 루틴 형성의 흐름을 균형 있게 조명.
@@ -290,7 +610,7 @@ dotprompt 9개와 공용 partial 2개(`_persona`, `_report_rules`)로 구성하�
   - `chatLogs` (대화 내역): 일상 맥락 파악 (중간 가중치).
   - `diaries` (감정 일기): **가장 높은 가중치 부여.** 리포트의 핵심 중심축으로 심리적 배경 전개.
 
-### 5. 예외 및 Fallback 전략
+### 3. 예외 및 Fallback 전략
 
 | 위험 | 대책 |
 | :--- | :--- |
