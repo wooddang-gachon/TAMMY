@@ -6,3 +6,4 @@
 | [0002](file:///Users/wooddang-mac/Desktop/code/1.%20Study/TAMMY/docs/adr/0002-idempotency-and-retro-backfill.md) | Idempotency and Retro Backfill Strategy | Accepted | `clientRequestId` 기반 멱등성 보장 및 회고 리포트 자동 백필 |
 | [0003](file:///Users/wooddang-mac/Desktop/code/1.%20Study/TAMMY/docs/adr/0003-hybrid-vision-pipeline.md) | Hybrid Vision Pipeline (Local Edge ONNX + Cloud LLM Fallback) | Accepted | 백엔드 내장 ONNX YOLOv8(비용 $0) + Cloud Gemini Vision 2단계 파이프라인 |
 | [0004](file:///Users/wooddang-mac/Desktop/code/1.%20Study/TAMMY/docs/adr/0004-text-emotion-sprite-sync-over-audio.md) | Text-Based Conversational Chat with Emotion-Sprite Sync | Accepted | STT/TTS 배제 및 텍스트 감정 분석 + 6종 타미 픽셀 모션 동기화 |
+| [0005](file:///Users/wooddang-mac/Desktop/code/1.%20Study/TAMMY/docs/adr/0005-food-tokenizer-and-master-db-protection.md) | FoodTokenizer and Master DB Protection Strategy | Accepted | 음식명 토크나이저(수식어/수량 분리) + 식약처 마스터 DB 보호 3단계 매핑 |

@@ -42,6 +42,18 @@ _Avoid_: Animation state, gesture, emote
 The visual capture and automatic detection of meal items mapped to nutritional components.
 _Avoid_: Calorie entry, diet logging, meal OCR
 
+**Food Tokenizer**:
+The rule-based linguistic preprocessor separating modifier prefixes (e.g., 매운, 치즈, 수제) and quantity units (e.g., 2인분, 200g) to extract normalized core food nouns.
+_Avoid_: NLP parser, food lemmatizer, word stemmer
+
+**Food Mapping**:
+The caching and association layer (`EXACT`, `ALIAS`, `SIMILARITY`) resolving user raw food inputs to authoritative standard nutrition entries.
+_Avoid_: Food dictionary, diet lookup table, calorie tag
+
+**Master Protection Principle**:
+The architectural invariant dictating that the 15,000 national standard food records in `foods` remain strictly immutable, isolating user-defined variants and alias links to `food_mappings`.
+_Avoid_: Auto-insert food, dynamic food schema, master override
+
 **Quick-Log**:
 A frictionless single-action entry for recording discrete wellness events like water intake, mood, short journal, or exercise duration.
 _Avoid_: Daily check-in, micro-logging, stamp
