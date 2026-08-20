@@ -144,6 +144,28 @@
 ### 3. 주요 비즈니스 로직 및 정책
 
 #### 3.1 토크나이저 기반 영양 DB 매칭 및 마스터 보호 정책
+
+```mermaid
+flowchart TD
+    A["사용자 입력 / 비전 추출 텍스트<br/>(예: '매운 치즈 닭갈비 2인분')"] --> B["FoodTokenizer 전처리"]
+    B --> B1["수식어 분리 ('매운', '치즈')<br/>수량 단위 분리 ('2인분')<br/>핵심명 추출: '닭갈비'"]
+    
+    B1 --> C{"1단계: food_mappings<br/>캐시 테이블 조회"}
+    C -- "Cache Hit (EXACT/ALIAS)" --> D["매핑된 영양 정보 반환"]
+    
+    C -- "Cache Miss" --> E{"2단계: foods 마스터 DB<br/>핵심명/키워드 검색"}
+    E -- "Master Match" --> F["food_mappings에<br/>ALIAS 연결 캐싱 등록<br/>(Master DB 불변 유지)"]
+    F --> G["식약처 표준 영양 데이터 반환"]
+    
+    E -- "Master Miss" --> H["3단계: AI 서버 Fallback<br/>(POST /v1/nutrition/lookup)"]
+    H --> I["Google Search Grounding<br/>웹 검색 기반 영양 조회"]
+    I --> J["AI 추정 영양 데이터 반환<br/>(isAiFallback: true)"]
+    
+    D --> K["섭취량(Gram) 비례 영양소 환산<br/>ratio = intakeGram / standardServingG<br/>식사 총합 집계"]
+    G --> K
+    J --> K
+```
+
 - **음식명 토크나이저 (`FoodTokenizer`)**:
   - 사용자 입력 및 비전 모델 추출 텍스트에서 20여 종의 수식어/접두어 사전(`FOOD_MODIFIER_DICTIONARY`: 매운, 수제, 치즈, 로제, 직화, 훈제 등)과 수량 정규식(`QUANTITY_PATTERN`: 2인분, 200g, 1그릇 등)을 사전 분리하여 핵심 음식명(`coreFoodName`)을 정규화합니다.
 - **식약처 마스터 DB 보호 3단계 스마트 매칭 (`getOrMapFood`)**:
@@ -155,6 +177,35 @@
   - 칼로리 및 3대 영양소(탄수화물, 단백질, 지방), 비타민/무기질%를 섭취량 비율에 맞게 정수로 반올림 환산하여 식사 단위로 합산 집계합니다.
 
 #### 3.2 2-게이지 보상 체계 및 5대 행성 차등 거리 단축 정책
+
+```mermaid
+stateDiagram-v2
+    [*] --> READY: 행성 초기화 (Distance: 100)
+
+    state READY {
+        [*] --> Logging: 일상 3M 활동 실천
+        Logging --> Logging: 식단 확정 (+50 Fuel, -10 Distance)<br/>1-Tap 퀵로그 (+10 Fuel, -5~-10 Distance)<br/>타미 대화 (+10 Fuel, -5 Distance)
+    }
+
+    READY --> TRAVELING: 출발 (Fuel == 100 & Distance == 0 달성)<br/>POST /planet-travel/start (Fuel 100 차감)
+    
+    state TRAVELING {
+        direction TB
+        Warping: 우주선 워프 항해 중
+        Warping --> DeferredLogging: 추가 3M 기록 시<br/>차기 사이클로 적립 이월
+    }
+
+    TRAVELING --> ARRIVED: 도착 확인 (POST /planet-travel/arrive)
+    
+    state ARRIVED {
+        Reset: 해당 행성 Distance 100 리셋
+        AsyncJob: AsyncQueue 비동기 리포트 생성 잡 등록
+        Generate: AI 심층 웰니스 리포트 생성 및 저장
+    }
+
+    ARRIVED --> READY: 다음 탐사 준비 완료
+```
+
 - **행동별 보상 체계 (`gamification.ts`)**:
   - **식단 확정 등록 (`FOOD_CONFIRM`)**: **+50 Fuel**, **+30 EXP**
   - **1-Tap 퀵로그 (`QUICK_LOG`)**: **+10 Fuel** (수분, 감정, 일기, 운동)
