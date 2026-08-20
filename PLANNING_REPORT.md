@@ -187,7 +187,157 @@
 ### 1. 데이터 모델링 (ERD / 스키마)
 
 #### 1.1 서비스 서버 영속 데이터 모델 (Prisma Schema)
-- **주요 엔티티**:
+
+```mermaid
+erDiagram
+    users ||--o| tammy_statuses : "1:1 상태 관리"
+    users ||--o{ user_planet_progress : "5대 행성 탐사 현황"
+    users ||--o{ fuel_logs : "연료 트랜잭션 기록"
+    users ||--o{ quick_logs : "1-Tap 간편 기록"
+    users ||--o{ meals : "식사 및 영양 기록"
+    users ||--o{ chat_messages : "타미 대화 내역"
+    users ||--o{ planet_reports : "행성 도착 AI 리포트"
+    users ||--o{ monthly_retro_reports : "월간 통합 회고"
+
+    meals ||--o{ meal_images : "식사 사진 (1:N)"
+    meals ||--o{ meal_items : "포함 음식 항목 (1:N)"
+    meal_images ||--o{ meal_items : "바운딩 박스 매핑"
+    foods ||--o{ meal_items : "영양 표준 참조"
+    foods ||--o{ food_mappings : "식약처 별칭 매핑"
+
+    users {
+        int id PK
+        string email UK
+        string nickname
+        int current_fuel
+        enum auth_provider
+        enum status
+        datetime created_at
+        datetime deleted_at
+    }
+
+    tammy_statuses {
+        int user_id PK,FK
+        int level
+        int current_exp
+        int empathy_index
+        int health_index
+        int activity_index
+        int happiness_index
+        datetime updated_at
+    }
+
+    user_planet_progress {
+        int user_id PK,FK
+        string planet_id PK
+        int distance
+        enum status "READY, TRAVELING, ARRIVED"
+        int trip_count
+        datetime last_arrived_at
+    }
+
+    fuel_logs {
+        bigint id PK
+        int user_id FK
+        int amount
+        string source
+        string client_request_id UK "멱등성 키"
+        datetime created_at
+    }
+
+    quick_logs {
+        bigint id PK
+        int user_id FK
+        enum category "WATER, EMOTION, JOURNAL, EXERCISE"
+        int amount
+        string emotion_type
+        text journal_content
+        int duration_minutes
+        int earned_fuel
+        string client_request_id UK "멱등성 키"
+        datetime created_at
+    }
+
+    meals {
+        bigint id PK
+        int user_id FK
+        enum meal_type "BREAKFAST, LUNCH, DINNER, SNACK"
+        int total_calories_kcal
+        decimal total_carbohydrate_g
+        decimal total_protein_g
+        decimal total_fat_g
+        datetime registered_at
+    }
+
+    meal_images {
+        bigint id PK
+        bigint meal_id FK
+        string image_url
+        boolean is_cover
+    }
+
+    meal_items {
+        bigint id PK
+        bigint meal_id FK
+        bigint meal_image_id FK
+        int food_id FK
+        string custom_food_name
+        decimal intake_gram
+        json bounding_box
+        decimal confidence
+    }
+
+    foods {
+        int id PK
+        string name UK
+        decimal standard_serving_g
+        int calories_kcal
+        decimal carbohydrate_g
+        decimal protein_g
+        decimal fat_g
+        string category
+    }
+
+    food_mappings {
+        bigint id PK
+        string raw_name UK
+        int food_id FK
+        enum match_type "EXACT, ALIAS, SIMILARITY"
+    }
+
+    chat_messages {
+        bigint id PK
+        int user_id FK
+        enum sender "USER, TAMMY, TAMMY_AI"
+        text message_text
+        string motion_tag
+        string intent_label
+        datetime created_at
+    }
+
+    planet_reports {
+        bigint id PK
+        string report_uuid UK
+        int user_id FK
+        string planet_id
+        int trip_number
+        string headline
+        text summary
+        datetime period_from
+        datetime period_to
+    }
+
+    monthly_retro_reports {
+        bigint id PK
+        int user_id FK
+        string year_month UK
+        int wellness_score
+        json content_json
+        datetime generated_at
+    }
+```
+
+- **주요 엔티티 설명**:
   - `users`: 계정, 인증 제공자, 전역 잔여 연료(`current_fuel`), 소프트 딜리트(`deleted_at`).
   - `tammy_statuses`: 타미 레벨, EXP, 공감/건강/활동/행복 지수 (1:1).
   - `user_planet_progress`: 5대 행성별 상태(`READY`, `TRAVELING`, `ARRIVED`), 남은 거리(`distance`), 탐사 횟수.
