@@ -145,7 +145,7 @@
 
 #### 3.1 토크나이저 기반 영양 DB 매칭 및 마스터 보호 정책
 - **음식명 토크나이저 (`FoodTokenizer`)**:
-  - 사용자 입력 및 비전 모델 추출 텍스트에서 20여 종의 수식어/접두어 사전(`FOOD_MODIFIER_DICTIONARY`: 매운, 수제, 치즈, 로제, 직화 등)과 수량 정규식(`QUANTITY_PATTERN`: 2인분, 200g, 1그릇 등)을 사전 분리하여 핵심 음식명(`coreFoodName`)을 정규화합니다.
+  - 사용자 입력 및 비전 모델 추출 텍스트에서 20여 종의 수식어/접두어 사전(`FOOD_MODIFIER_DICTIONARY`: 매운, 수제, 치즈, 로제, 직화, 훈제 등)과 수량 정규식(`QUANTITY_PATTERN`: 2인분, 200g, 1그릇 등)을 사전 분리하여 핵심 음식명(`coreFoodName`)을 정규화합니다.
 - **식약처 마스터 DB 보호 3단계 스마트 매칭 (`getOrMapFood`)**:
   1. **1단계 (캐시 조회)**: `food_mappings` 테이블에서 `raw_name`을 조회하여 기존 매핑 결과(`EXACT` / `ALIAS`)를 O(1)로 반환합니다.
   2. **2단계 (토크나이저 마스터 검색)**: 정규화된 `coreFoodName`으로 `foods` 마스터 테이블(1.5만 건)을 검색합니다. 매칭 성공 시 `foods` 테이블은 일체 수정하지 않고 `food_mappings`에 `ALIAS`로 연결 레코드를 자동 캐싱 등록합니다 (**Master Protection Principle**).
@@ -154,27 +154,42 @@
   - `ratio = intakeGram / standardServingG (기본 100g)`
   - 칼로리 및 3대 영양소(탄수화물, 단백질, 지방), 비타민/무기질%를 섭취량 비율에 맞게 정수로 반올림 환산하여 식사 단위로 합산 집계합니다.
 
-#### 3.2 연료/경험치 보상 및 게이미피케이션 동시성 정책
+#### 3.2 2-게이지 보상 체계 및 5대 행성 차등 거리 단축 정책
 - **행동별 보상 체계 (`gamification.ts`)**:
   - **식단 확정 등록 (`FOOD_CONFIRM`)**: **+50 Fuel**, **+30 EXP**
   - **1-Tap 퀵로그 (`QUICK_LOG`)**: **+10 Fuel** (수분, 감정, 일기, 운동)
   - **타미 대화 참여 (`CHAT`)**: **+10 Fuel**
-- **2-게이지 밸런스 및 라이프사이클**:
-  - 전역 공용 연료 `Fuel` (0~100)과 5대 행성별 독립 남은 거리 `Distance` (100~0)를 분리 운용합니다.
-  - 일상 속 3M 실천 10~20회 시 정확히 1개 행성 완주 및 100 Fuel이 충전되도록 설계되었습니다.
+- **행동별 5대 행성 차등 거리 단축 (`DISTANCE_REDUCTIONS`)**:
+  - **식단 확정 (`MEAL_CONFIRM`)**: 식단 탐사 별 **-10 Distance**
+  - **1-Tap 물 기록 (`WATER_LOG`)**: 수분 탐사 별 **-5 Distance**
+  - **1-Tap 감정 기록 (`EMOTION_QUICK`)**: 감정 대화 별 **-5 Distance**
+  - **타미 공감 대화 (`CHAT_EMOTION`)**: 감정 대화 별 **-5 Distance**
+  - **한 줄 감정일기 (`EMOTION_DIARY`)**: 감정 대화 별 **-10 Distance** (깊은 멘탈케어 가중치)
+  - **운동 타이머 완료 (`EXERCISE_LOG`)**: 라이프스타일 별 **-10 Distance**
 - **출발/도착 상태 전이 및 동시성 제어**:
   - **출발 (`POST /planet-travel/start`)**: `required_fuel`(100) 즉시 차감 및 상태 `TRAVELING` 전이. 이미 `IN_PROGRESS`인 탐사가 존재할 경우 중복 탐사가 차단됩니다 (`400 ALREADY_IN_PROGRESS_TRAVEL`).
   - **도착 및 리포트**: 행성 Distance 100 리셋, 상태 `ARRIVED` 전이 및 비동기 AI 리포트 생성 잡이 큐에 등록됩니다. 워프 도중 남긴 기록은 차기 탐사 사이클로 안전하게 이월 적립됩니다.
 
-#### 3.3 백엔드 데이터 무결성 및 비동기 작업 큐 정책
-- **No Auto-Create 원칙**:
-  - 모든 서비스 계층(Auth, Chat, Food, QuickLog, Travel, User)에서 사용자 식별자 유효성을 선행 검증하며, 미존재 시 `404 UserNotFoundError`를 발생시켜 무단 자동 생성을 엄격히 차단합니다.
-- **멱등성(Idempotency) 보장**:
-  - 모바일 네트워크 패킷 재전송에 대비하여 상태 변경 API에 `clientRequestId` 고유 식별자 검증 계층을 구현하여 중복 보상 적립을 방지합니다.
-- **메모리 기반 비동기 큐 (`AsyncQueue`)**:
-  - 리포트 생성 등 고부하 비동기 작업은 동시성 2개 제한의 `AsyncQueue` 싱글톤 인스턴스에서 순차 처리하며, 진행률(`progressPercent`)을 실시간 추적 관리합니다.
+#### 3.3 온디바이스 로컬 비전 전처리 및 NMS 시각화 파이프라인
+- **Sharp 전처리**: 업로드된 원본 이미지를 640×640 Float32 RGB 정규화 텐서(0.0~1.0)로 변환하여 로컬 ONNX 모델 추론에 공급합니다.
+- **NMS(Non-Maximum Suppression) 필터링**: 객체 탐지 신뢰도 임계값(0.45) 및 IoU 임계값(0.45)을 적용하여 중복 바운딩 박스를 병합합니다.
+- **SVG 디버그 오버레이 합성**: 탐지된 좌표에 4px 테두리와 반투명 라벨을 SVG 컴포지션으로 합성한 `*_debug.jpg` 이미지를 자동 생성하여 검수 및 디버깅을 지원합니다.
 
-#### 3.4 AI 및 데이터 처리 정책
+#### 3.4 대화 컨텍스트 윈도우 및 메모리 캡슐(Memory Capsule) 분리 정책
+- **10턴 슬라이딩 윈도우**: 최근 10개의 대화 히스토리만 선별하여 AI 서버에 전달하며, DB 조회 실패 시에도 빈 배열로 Graceful degradation을 보장합니다.
+- **메모리 캡슐(Memory Capsule) 추출**: AI 대화 중 사용자의 중요한 취향이나 일상 맥락이 발견되면 `extractedMemory`를 추출하여 별도 저장하고 개인화 대화에 활용합니다.
+
+#### 3.5 선제적 안부 트리거(Proactive Trigger) 및 주기적 스케줄링 정책
+- **미기록 감지 스케줄러 (매일 23:30)**: 당일 수분 기록이 0건인 사용자를 자동 감지하여 `NO_WATER` 안부 트리거를 생성(`status: PENDING`)하고 익일 타미의 선제적 말걸기를 유도합니다.
+- **30-Day TTL 데이터 파기 (매월 1일 01:00)**: 30일이 경과한 미처리 안부 트리거 레코드를 자동으로 영구 삭제하여 DB를 최적화합니다.
+- **월간 웰니스 스코어 산출 엔진**: 5대 행성 탐사 횟수, 총 주행 거리(500 목표 대비), 3M 실천 빈도를 가중 합산하여 `wellness_score`를 계산하고 `monthly_retro_reports` JSON을 생성합니다.
+
+#### 3.6 백엔드 데이터 무결성 및 비동기 작업 큐 정책
+- **No Auto-Create 원칙**: 모든 서비스 계층(Auth, Chat, Food, QuickLog, Travel, User)에서 사용자 식별자 유효성을 선행 검증하며, 미존재 시 `404 UserNotFoundError`를 발생시켜 무단 자동 생성을 엄격히 차단합니다.
+- **멱등성(Idempotency) 보장**: 모바일 네트워크 패킷 재전송에 대비하여 상태 변경 API에 `clientRequestId` 고유 식별자 검증 계층을 구현하여 중복 보상 적립을 방지합니다.
+- **메모리 기반 비동기 큐 (`AsyncQueue`)**: 리포트 생성 등 고부하 비동기 작업은 동시성 2개 제한의 `AsyncQueue` 싱글톤 인스턴스에서 순차 처리하며, 진행률(`progressPercent`)을 실시간 추적 관리합니다.
+
+#### 3.7 AI 및 데이터 처리 정책
 
 | 정책 | 내용 |
 | :--- | :--- |
