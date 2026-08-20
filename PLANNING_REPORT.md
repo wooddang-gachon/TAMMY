@@ -256,18 +256,32 @@ flowchart TD
 - **30-Day TTL 데이터 파기 (매월 1일 01:00)**:
   - 30일이 경과한 미처리 안부 트리거 레코드를 자동으로 영구 삭제하여 데이터베이스를 최적화합니다.
 - **균형 보정 웰니스 스코어(Wellness Score, 0~100점) 산출 엔진**:
-  - **1단계: 4대 영역별 상한 기본 점수 (Base Score, 최대 100점)**:
-    - 식사(Meal): min(25, 식사 도착수 × 5.5)
-    - 수분(Water): min(25, 수분 도착수 × 4.1)
-    - 감정(Emotion): min(25, 감정 도착수 × 5.5)
-    - 생활습관(Habit): min(25, 습관 도착수 × 6.5)
-    - BaseScore = 식사점수 + 수분점수 + 감정점수 + 습관점수
-  - **2단계: 표준편차 기반 균형 보정 계수 (Balance Factor)**:
-    - mean = 총 도착수 ÷ 4, variance = Σ(영역별 도착수 - mean)² ÷ 4, stdDev = √variance
-    - balanceFactor = max(0.6, 1 - (stdDev ÷ (mean + 1)) × 0.55)
-    - 특정 영역만 편식하는 행동 패턴에 대해 최대 40% 페널티를 부과하여 4대 건강 영역의 균형 있는 실천을 유도합니다.
-  - **3단계: 최종 점수 환산**:
-    - FinalScore = min(100, max(10, round(BaseScore × balanceFactor))) (활동 기록이 0건인 경우 0점 반환).
+  
+  **1단계: 4대 영역별 상한 기본 점수 (Base Score, 최대 100점)**
+  $$
+  S_{\text{base}} = \min(25, N_{\text{meal}} \times 5.5) + \min(25, N_{\text{water}} \times 4.1) + \min(25, N_{\text{emotion}} \times 5.5) + \min(25, N_{\text{habit}} \times 6.5)
+  $$
+  - $N_{\text{meal}}, N_{\text{water}}, N_{\text{emotion}}, N_{\text{habit}}$: 당월 4대 영역별 행성 완주(도착) 횟수.
+  - 각 영역당 최대 25점으로 상한 클램핑하여 특정 한 영역만 과다 달성하더라도 기본 점수는 최대 100점으로 제한됩니다.
+
+  **2단계: 표준편차 기반 균형 보정 계수 (Balance Factor)**
+  $$
+  \mu = \frac{1}{4} \sum_{i \in \{\text{meal, water, emotion, habit}\}} N_i, \quad \sigma = \sqrt{\frac{1}{4} \sum_{i} (N_i - \mu)^2}
+  $$
+  $$
+  F_{\text{balance}} = \max\left(0.6, \, 1 - \frac{\sigma}{\mu + 1} \times 0.55\right)
+  $$
+  - 4개 영역이 고르게 실천될수록 $\sigma \to 0$이 되어 보정 계수는 $1.0$에 수렴합니다.
+  - 특정 영역에만 치우친 편식형 행동 패턴에는 최대 40% 감점 페널티(하한 $0.6$)를 부과합니다.
+
+  **3단계: 최종 점수 환산 및 영속화 (Final Clamping)**
+  $$
+  S_{\text{wellness}} = 
+  \begin{cases} 
+  0 & (\text{if } \sum N_i = 0) \\
+  \min\left(100, \, \max\left(10, \, \text{round}(S_{\text{base}} \times F_{\text{balance}})\right)\right) & (\text{otherwise})
+  \end{cases}
+  $$
   - 산출된 점수와 행성별 완주 통계는 `monthly_retro_reports` JSON 아티팩트로 영속화됩니다.
 
 #### 3.6 백엔드 데이터 무결성 및 비동기 작업 큐 정책
