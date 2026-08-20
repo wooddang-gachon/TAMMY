@@ -222,6 +222,25 @@ stateDiagram-v2
   - **도착 및 리포트**: 행성 Distance 100 리셋, 상태 `ARRIVED` 전이 및 비동기 AI 리포트 생성 잡이 큐에 등록됩니다. 워프 도중 남긴 기록은 차기 탐사 사이클로 안전하게 이월 적립됩니다.
 
 #### 3.3 로컬 ONNX 추론 및 하이브리드 비전 폴백 정책
+
+```mermaid
+flowchart TD
+    A["식단 사진 업로드<br/>(Client -> Service Server)"] --> B["Sharp 이미지 전처리<br/>(640x640 Float32 NCHW Tensor 정규화)"]
+    
+    B --> C["1단계: 로컬 ONNX Runtime 고속 추론<br/>(YOLOv8 best.onnx, 300~500ms, 비용 $0)"]
+    
+    C --> D{"로컬 검출 판정<br/>(Confidence >= 0.60 & 객체 탐지 성공?)"}
+    
+    D -- "성공 (단일/표준 식단)" --> E["로컬 바운딩 박스 & 음식명 확정<br/>(scanEngine: 'YOLO')"]
+    
+    D -- "실패 / 저신뢰도 (객체 0개 또는 신뢰도 < 0.60)" --> F["2단계: Cloud AI 서버 Fallback<br/>(POST /v1/vision/analyze-food)"]
+    F --> G["Gemini 3.5 Flash Lite Vision<br/>다중 음식 객체 정밀 멀티모달 인식"]
+    G --> H["[ymin, xmin, ymax, xmax] 2D 좌표<br/>0.0~1.0 실수 정규화 변환 & 클램프<br/>(scanEngine: 'VisionLLM')"]
+    
+    E --> I["FoodService.getOrMapFood<br/>식약처 마스터 DB 3단계 매핑 연계"]
+    H --> I
+```
+
 - **로컬 ONNX Runtime 1차 고속 추론**:
   - `Sharp` 라이브러리를 통해 업로드된 이미지를 640×640 해상도 정규화 텐서로 전처리한 후, 서비스 서버 내장 `best.onnx` 모델로 300~500ms 이내에 주요 음식을 1차 로컬 검출(API 비용 $0 및 초저지연 달성)합니다.
 - **클라우드 멀티모달 LLM 2차 폴백 연계**:
